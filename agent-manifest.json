@@ -1,0 +1,96 @@
+{
+  "brand": "MeshWeave Studio",
+  "networks": [
+    {
+      "name": "meshweave_composer",
+      "front_man": "mesh_orchestrator",
+      "hocon": "./meshweave_composer.network.json",
+      "description": "Cross-Site Open Agentic Web Workflow DAG Composer, Live Action-Bridge MessageChannel Runner, Interop Matrix Prober, and Composable .network.json Generator (MVP Profile 0.3).",
+      "tags": [
+        "workflow-dag",
+        "action-bridge",
+        "messagechannel",
+        "interop-prober",
+        "composer",
+        "open-agentic-web",
+        "mvp-0.3"
+      ],
+      "sample_queries": [
+        "Compose and run a 3-origin MessageChannel DAG across ScopeGate, NandaSeal, and MeshWeave.",
+        "Probe all Open Agentic Web partner websites for bridge framing, CORS, and catalog schemas.",
+        "Validate whether upstream hop outputs satisfy downstream bridge action inputSchema contracts.",
+        "Export a compiled MVP Profile 0.3 .network.json, agent-manifest.json, and trace digest."
+      ]
+    }
+  ],
+  "llm_router": {
+    "base_url": "https://api.otari.ai/api/v1",
+    "mock": false,
+    "byok_router": "https://api.otari.ai/api/v1"
+  },
+  "allowed_peers": [
+    "https://worldwideagenticweb.org",
+    "https://cocvn157.github.io",
+    "https://shutdown-clerk.pages.dev",
+    "https://sainath998.github.io",
+    "https://montbaga.github.io",
+    "https://agent-atlas-phi.vercel.app",
+    "https://ledenti.github.io"
+  ],
+  "peer_policy": {
+    "mode": "allowlist",
+    "deny_origins": [],
+    "require_frameable_bridge": true,
+    "strip_unlisted_sly_data": true,
+    "note": "Cross-site read actions execute in origin-isolated action-bridge.html iframes over MessageChannel; user BYOK router credentials never cross origins."
+  },
+  "agent_mcp": {
+    "protocol": "nsdeploy-agent-mcp/v1",
+    "network": "meshweave_composer",
+    "front_man": "mesh_orchestrator",
+    "available": false,
+    "reason": "Static GitHub Pages bundle executing cross-site MessageChannel DAG workflows directly in the visitor's browser."
+  },
+  "theme": {
+    "primary": "#38bdf8"
+  },
+  "linking": {
+    "protocol": "nsdeploy-link/v1",
+    "exports": [
+      {
+        "network": "meshweave_composer",
+        "front_man": "mesh_orchestrator",
+        "aliases": [
+          "meshweave_composer",
+          "mesh_orchestrator"
+        ],
+        "url": "meshweave_composer"
+      }
+    ],
+    "imports": [
+      "https://cocvn157.github.io/scopegate-studio/scopegate_broker",
+      "https://cocvn157.github.io/nanda-seal/nanda_seal_verifier"
+    ],
+    "link_updates": {
+      "mode": "browser-local"
+    }
+  },
+  "deployment": {
+    "mode": "static",
+    "self_contained_runtime": true,
+    "browser_mock": true,
+    "direct_byok": true,
+    "direct_mcp_requires_cors": true,
+    "public_mcp_facade": false
+  },
+  "actions": {
+    "version": 1,
+    "module": "./mesh-actions.js",
+    "bridge": "./bridge/action-bridge.html",
+    "agentTools": [
+      "validate_edge_contract",
+      "compose_mesh_contract",
+      "get_meshweave_capabilities"
+    ]
+  }
+}

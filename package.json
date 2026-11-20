@@ -1,0 +1,10 @@
+{
+  "name": "meshweave-studio",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Cross-Site Open Agentic Web Workflow DAG Composer & Live Bridge Contract Prober (MVP Profile 0.3).",
+  "scripts": {
+    "test": "node --test tests/meshweave.test.mjs"
+  },
+  "license": "MIT"
+}

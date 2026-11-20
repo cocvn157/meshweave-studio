@@ -1,0 +1,152 @@
+{
+  "aaosa_instructions": "Coordinate cross-site Open Agentic Web workflow composition, live action-bridge contract probing, and MVP Profile 0.3 network compilation without forwarding user BYOK keys or unlisted sly_data across origins.",
+  "aaosa_call": {
+    "description": "Plans multi-hop workflows, probes partner bridge contracts, or compiles portable .network.json orchestration manifests.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "inquiry": {
+          "type": "string",
+          "description": "The workflow composition, contract probing, or compilation inquiry"
+        },
+        "mode": {
+          "type": "string",
+          "description": "'Determine' to check relevance, 'Fulfill' to run or plan the composition, or 'Follow up' to inspect edge contracts."
+        }
+      },
+      "required": [
+        "inquiry",
+        "mode"
+      ]
+    }
+  },
+  "aaosa_command": "",
+  "metadata": {
+    "description": "Cross-site workflow DAG composer and live action-bridge contract prober for the Open Agentic Web (MVP Profile 0.3).",
+    "sample_queries": [
+      "Compose and run a 3-origin MessageChannel DAG across ScopeGate, NandaSeal, and MeshWeave.",
+      "Probe all Open Agentic Web partner websites for bridge framing, CORS, and catalog schemas.",
+      "Validate whether upstream hop outputs satisfy downstream bridge action inputSchema contracts.",
+      "Export a compiled MVP Profile 0.3 .network.json, agent-manifest.json, and trace digest."
+    ],
+    "date_created": "2026-11-20T05:20:00+00:00",
+    "author": "Luu Quoc Trung (@cocvn157)"
+  },
+  "llm_config": {
+    "model_name": "alibaba/qwen3.8-flash"
+  },
+  "max_steps": 12,
+  "max_execution_seconds": 300,
+  "instructions_prefix": "You are MeshWeave Studio, a cross-site workflow DAG composer and live action-bridge contract prober for the Open Agentic Web (MVP Profile 0.3). Report exact bridge protocols, CORS headers, catalog schemas, and compiled peer topologies. Never forward user credentials to peer origins.",
+  "link_labels": {
+    "https://cocvn157.github.io/scopegate-studio/scopegate_broker": "ScopeGate Studio",
+    "https://cocvn157.github.io/nanda-seal/nanda_seal_verifier": "NandaSeal Trust Studio"
+  },
+  "tools": [
+    {
+      "name": "mesh_orchestrator",
+      "function": {
+        "description": "Front coordinator for cross-site workflow DAG planning, live bridge contract probing, and MVP Profile 0.3 manifest compilation.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "inquiry": {
+              "type": "string",
+              "description": "The workflow or interoperability request"
+            }
+          },
+          "required": [
+            "inquiry"
+          ]
+        }
+      },
+      "instructions": "Route multi-hop DAG wiring and edge contract matching to dag_contract_planner, live manifest/bridge/MCP endpoint checks to bridge_matrix_prober, and .network.json / links.json generation to topology_manifest_compiler. Use website_validate_edge_contract, website_compose_mesh_contract, or website_get_meshweave_capabilities when registered.",
+      "tools": [
+        "dag_contract_planner",
+        "bridge_matrix_prober",
+        "topology_manifest_compiler"
+      ],
+      "allow": {
+        "to_downstream": {
+          "sly_data": []
+        }
+      }
+    },
+    {
+      "name": "dag_contract_planner",
+      "function": {
+        "description": "Plans multi-hop cross-site workflows, checks acyclic topology, and verifies edge inputSchema/outputSchema compatibility across partner bridges.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "inquiry": {
+              "type": "string",
+              "description": "Multi-hop workflow or edge mapping inquiry"
+            }
+          },
+          "required": [
+            "inquiry"
+          ]
+        }
+      },
+      "instructions": "Verify topological ordering, detect cycles, check required inputSchema arguments and additionalProperties rules, and coordinate read-only partner bridges at ScopeGate Studio and NandaSeal Trust Studio.",
+      "tools": [
+        "https://cocvn157.github.io/scopegate-studio/scopegate_broker",
+        "https://cocvn157.github.io/nanda-seal/nanda_seal_verifier"
+      ],
+      "allow": {
+        "to_downstream": {
+          "sly_data": []
+        }
+      }
+    },
+    {
+      "name": "bridge_matrix_prober",
+      "function": {
+        "description": "Probes partner agent-manifest.json, .network.json, links.json, agent-mcp.json, and bridge/action-bridge.html headers and MessageChannel catalogs.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "inquiry": {
+              "type": "string",
+              "description": "Partner URL or interop matrix query"
+            }
+          },
+          "required": [
+            "inquiry"
+          ]
+        }
+      },
+      "instructions": "Inspect CORS Access-Control-Allow-Origin, framing policies, action-bridge manifests, callerOrigins, and round-trip latencies, reporting clear non-blocking diagnostics.",
+      "allow": {
+        "to_downstream": {
+          "sly_data": []
+        }
+      }
+    },
+    {
+      "name": "topology_manifest_compiler",
+      "function": {
+        "description": "Compiles composed multi-hop DAGs into valid MVP Profile 0.3 .network.json, agent-manifest.json, links.json, and canonical SHA-256 execution traces.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "inquiry": {
+              "type": "string",
+              "description": "Compilation or export configuration inquiry"
+            }
+          },
+          "required": [
+            "inquiry"
+          ]
+        }
+      },
+      "instructions": "Emit data-only Neuro SAN network definitions with zero unresolved environment placeholders, deduplicated allowed_peers, and deny-by-default sly_data rules.",
+      "allow": {
+        "to_downstream": {
+          "sly_data": []
+        }
+      }
+    }
+  ]
+}

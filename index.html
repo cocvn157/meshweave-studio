@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MeshWeave Studio — Cross-Site Open Agentic Web DAG Composer & Bridge Prober</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <div class="brand-block">
+        <div class="eyebrow">OPEN AGENTIC WEB · MVP PROFILE 0.3 · MULTI-HOP BRIDGE ORCHESTRATOR</div>
+        <div class="title-row">
+          <h1>MeshWeave Studio</h1>
+          <span id="self-bridge-pill" class="pill neutral">Checking Self-Bridge…</span>
+        </div>
+        <p class="subtitle">
+          Visually compose cross-site workflows over live <code>ActionBridgeClient</code> / <code>MessageChannel</code> bridges,
+          probe partner contracts &amp; schemas, and compile portable <code>.network.json</code> topologies.
+        </p>
+      </div>
+      <div class="artifact-box">
+        <div class="artifact-label">PUBLISHED MVP 0.3 ENDPOINTS</div>
+        <div class="artifact-links">
+          <a href="./agent-manifest.json" target="_blank" rel="noopener">agent-manifest.json</a>
+          <a href="./meshweave_composer.network.json" target="_blank" rel="noopener">.network.json</a>
+          <a href="./links.json" target="_blank" rel="noopener">links.json</a>
+          <a href="./bridge/action-bridge.html" target="_blank" rel="noopener">action-bridge.html</a>
+          <a href="./agent-mcp.json" target="_blank" rel="noopener">agent-mcp.json</a>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="container main-shell">
+    <nav class="tabs" role="tablist" aria-label="MeshWeave Studio Views">
+      <button class="tab active" data-tab="composer" role="tab" aria-selected="true">
+        1. Workflow DAG Composer
+      </button>
+      <button class="tab" data-tab="prober" role="tab" aria-selected="false">
+        2. Bridge Contract &amp; Interop Matrix
+      </button>
+      <button class="tab" data-tab="export" role="tab" aria-selected="false">
+        3. Composable Manifest &amp; Trace Export
+      </button>
+    </nav>
+
+    <!-- TAB 1: WORKFLOW DAG COMPOSER -->
+    <section id="tab-composer" class="panel active" role="tabpanel">
+      <div class="toolbar card">
+        <div class="toolbar-row">
+          <div class="preset-group">
+            <label for="pipeline-select" class="field-label">Instant $0-Key Pipeline</label>
+            <select id="pipeline-select" class="select"></select>
+          </div>
+          <label class="toggle-chip" title="When enabled, bridges that emit legacy nsdeploy-action-bridge/v1 instead of Cognizant nsdeploy-actions-v1 MessageChannel are rejected fail-closed.">
+            <input id="strict-protocol-toggle" type="checkbox" />
+            <span>Strict MessageChannel Only</span>
+          </label>
+          <div class="toolbar-actions">
+            <button id="btn-run-dag" class="btn primary">&#9654; Run Live DAG</button>
+            <button id="btn-open-add-hop" class="btn secondary">+ Add Partner Hop</button>
+            <button id="btn-open-add-edge" class="btn secondary">+ Wire Edge</button>
+            <button id="btn-reset-run" class="btn ghost">Reset Run</button>
+          </div>
+        </div>
+        <div id="pipeline-description" class="pipeline-desc"></div>
+      </div>
+
+      <div class="composer-grid">
+        <!-- Left: Visual DAG Graph -->
+        <div class="card dag-stage">
+          <div class="stage-header">
+            <div id="dag-status-banner" class="status-pill neutral">Validating DAG…</div>
+            <div class="stage-legend">
+              <span class="legend-item"><i class="dot match"></i> Schema Match</span>
+              <span class="legend-item"><i class="dot mismatch"></i> Schema Mismatch</span>
+              <span class="legend-item"><i class="dot live"></i> Live Executed</span>
+            </div>
+          </div>
+          <div id="dag-canvas-scroll" class="dag-canvas-scroll">
+            <div id="dag-canvas" class="dag-canvas">
+              <svg id="dag-edges-svg" class="dag-edges-svg" aria-hidden="true"></svg>
+              <div id="dag-columns" class="dag-columns"></div>
+              <div id="edge-badges-layer" class="edge-badges-layer"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Contextual Inspector / Add Hop / Wire Edge -->
+        <aside class="card inspector-panel" id="inspector-panel">
+          <div id="inspector-content"></div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- TAB 2: BRIDGE CONTRACT & INTEROP MATRIX PROBER -->
+    <section id="tab-prober" class="panel" role="tabpanel">
+      <div class="card">
+        <div class="prober-header">
+          <div>
+            <h2>Live Bridge Contract &amp; Ecosystem Interop Prober</h2>
+            <p class="muted">
+              Validates <code>agent-manifest.json</code> (CORS ACAO), <code>.network.json</code>, <code>links.json</code>,
+              <code>agent-mcp.json</code>, and connects via hidden iframe to test <code>bridge/action-bridge.html</code> catalogs &amp; schemas.
+            </p>
+          </div>
+          <button id="btn-probe-matrix" class="btn primary">Probe Full Ecosystem Matrix (9 Sites)</button>
+        </div>
+
+        <div class="probe-input-row">
+          <input id="probe-url-input" class="input" type="url" value="." placeholder="https://partner.example or https://partner.example/network_name" />
+          <button id="btn-probe-single" class="btn secondary">Probe Single Partner</button>
+        </div>
+        <div id="probe-quick-chips" class="chip-row"></div>
+      </div>
+
+      <div id="single-probe-results" class="probe-detail-card card">
+        <div class="empty-state">Select a partner chip or click <strong>Probe Single Partner</strong> to inspect its full MVP Profile 0.3 &amp; Action-Bridge contract.</div>
+      </div>
+
+      <div class="card mt-16">
+        <div class="matrix-header">
+          <h3>Open Agentic Web Ecosystem Interop Matrix</h3>
+          <span id="matrix-summary-badge" class="pill neutral">Not probed yet</span>
+        </div>
+        <div class="table-wrap">
+          <table class="matrix-table" id="matrix-table">
+            <thead>
+              <tr>
+                <th>Site &amp; Network</th>
+                <th>Manifest &amp; CORS</th>
+                <th>.network.json</th>
+                <th>links / MCP</th>
+                <th>Live Bridge Protocol &amp; Catalog</th>
+                <th>RTT</th>
+                <th>Contract Diagnostics</th>
+              </tr>
+            </thead>
+            <tbody id="matrix-tbody">
+              <tr>
+                <td colspan="7" class="muted center-cell">Click <strong>Probe Full Ecosystem Matrix (9 Sites)</strong> to benchmark live partner bridges.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: COMPOSABLE MANIFEST & TRACE EXPORT -->
+    <section id="tab-export" class="panel" role="tabpanel">
+      <div class="card">
+        <div class="export-header">
+          <div>
+            <h2>Composable <code>.network.json</code>, Manifest &amp; Shareable Trace Compiler</h2>
+            <p class="muted">Compiles your live visual DAG into portable Open Agentic Web MVP Profile 0.3 files and a SHA-256 execution trace.</p>
+          </div>
+          <div id="compile-validation-badge" class="pill pass">Valid Bundle (0 errors)</div>
+        </div>
+
+        <div class="compile-form">
+          <label>
+            <span class="field-label">Network Name</span>
+            <input id="cfg-network-name" class="input" type="text" value="composed_mesh_workflow" />
+          </label>
+          <label>
+            <span class="field-label">Front Coordinator</span>
+            <input id="cfg-front-man" class="input" type="text" value="mesh_coordinator" />
+          </label>
+          <label>
+            <span class="field-label">Max Steps</span>
+            <input id="cfg-max-steps" class="input" type="number" min="4" max="30" value="12" />
+          </label>
+          <label>
+            <span class="field-label">Peer Binding Mode</span>
+            <select id="cfg-binding-mode" class="select">
+              <option value="direct">Direct Peer URLs</option>
+              <option value="link_slots">Symbolic link_slots + links.json</option>
+            </select>
+          </label>
+          <label>
+            <span class="field-label">Downstream sly_data</span>
+            <select id="cfg-sly-mode" class="select">
+              <option value="deny">Deny All ([])</option>
+              <option value="request_id">Allow ["request_id"] Only</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="subtabs-row">
+          <div class="subtabs" role="tablist">
+            <button class="subtab active" data-artifact="network">.network.json</button>
+            <button class="subtab" data-artifact="manifest">agent-manifest.json</button>
+            <button class="subtab" data-artifact="links">links.json</button>
+            <button class="subtab" data-artifact="trace">meshweave-trace.json</button>
+          </div>
+          <div class="artifact-actions">
+            <button id="btn-copy-artifact" class="btn secondary">Copy JSON</button>
+            <button id="btn-download-artifact" class="btn primary">Download File</button>
+          </div>
+        </div>
+
+        <div id="compile-messages" class="compile-messages"></div>
+        <pre id="artifact-preview" class="code-viewer"></pre>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>

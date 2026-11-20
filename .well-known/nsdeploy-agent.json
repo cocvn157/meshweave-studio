@@ -1,0 +1,6 @@
+{
+  "protocol": "nsdeploy-agent/v1",
+  "network": "meshweave_composer",
+  "front_man": "mesh_orchestrator",
+  "manifest": "../agent-manifest.json"
+}

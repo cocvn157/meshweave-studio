@@ -1,0 +1,7 @@
+{
+  "protocol": "nsdeploy-agent-mcp/v1",
+  "network": "meshweave_composer",
+  "front_man": "mesh_orchestrator",
+  "available": false,
+  "reason": "Static GitHub Pages bundle executing cross-site MessageChannel DAG workflows directly in the visitor's browser."
+}

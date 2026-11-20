@@ -1,0 +1,6 @@
+.edge_tmp/
+.chrome_tmp/
+node_modules/
+_site/
+*.log
+.DS_Store

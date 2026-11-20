@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "MeshWeave Studio",
+  "protocol": "open-agentic-web/mvp-0.3",
+  "manifest": "./agent-manifest.json",
+  "networks": [
+    "meshweave_composer"
+  ]
+}
