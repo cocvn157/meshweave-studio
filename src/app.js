@@ -976,7 +976,7 @@ function renderActiveArtifactPreview() {
 
 async function initSelfBridgeBadge() {
   try {
-    const res = await probeBridgeChannel('./bridge/action-bridge.html', { timeoutMs: 4000 });
+    const res = await probeBridgeChannel('./bridge/action-bridge.html', { timeoutMs: 9000 });
     if (res.connected && res.actions.length > 0) {
       dom.selfBridgePill.className = 'pill pass';
       dom.selfBridgePill.textContent = `Self-Bridge Ready · ${res.wireProtocol} (${res.actions.length} actions · ${res.handshakeMs}ms)`;
