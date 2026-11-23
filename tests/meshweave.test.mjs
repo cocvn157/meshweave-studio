@@ -8,14 +8,27 @@ import { fileURLToPath } from 'node:url';
 import { ActionRegistry, validateData } from '../runtime/actions.js';
 import { registerActions as registerBridgeActions } from '../bridge/bridge-actions.js';
 import { registerActions as registerLocalActions } from '../mesh-actions.js';
+import { simulateRogueFrameAttack } from '../src/bridge-runner.js';
+import { auditComposableBundle, validateBridgeInboundFrame } from '../src/bridge-security.js';
 import {
+  DEFAULT_HOP_SLY_CONTEXT,
+  detectSlyCanary,
   evaluateEdgeContract,
+  evaluateHopSlyBoundary,
   evaluateNodeInputs,
+  reorderDagNodes,
   resolveJsonPath,
   resolveNodeArguments,
+  safeClone,
+  toggleDagNode,
   validateDag,
 } from '../src/dag-engine.js';
-import { buildShareableTrace, compileWorkflowBundle } from '../src/mesh-compiler.js';
+import {
+  buildShareableTrace,
+  compileUnifiedBundle,
+  compileWorkflowBundle,
+  verifyShareableTrace,
+} from '../src/mesh-compiler.js';
 import { SAMPLE_PIPELINES } from '../src/presets.js';
 import { probeSiteArtifacts, validateNetworkStructure } from '../src/prober.js';
 
@@ -364,4 +377,266 @@ test('Repository contains all required MVP Profile 0.3 artifacts and 8 Apache-2.
   assert.ok(!/\$\{[A-Z0-9_]+\}/.test(netText), 'Must not have unresolved ${ENV} tokens');
   const net = JSON.parse(netText);
   assert.equal(validateNetworkStructure(net).errors.length, 0);
+});
+
+test('toggleDagNode toggles hop enabled state immutably without mutating original DAG', () => {
+  const original = safeClone(SAMPLE_PIPELINES[0]);
+  const disabled = toggleDagNode(original, 'hop_2_seal');
+  assert.equal(original.nodes[1].enabled, true);
+  assert.equal(disabled.nodes[1].enabled, false);
+  const reEnabled = toggleDagNode(disabled, 'hop_2_seal');
+  assert.equal(reEnabled.nodes[1].enabled, true);
+});
+
+test('reorderDagNodes swaps hops earlier/later and rewires linear chain edges safely', () => {
+  const p3 = safeClone(SAMPLE_PIPELINES[2]); // hop_1_broker -> hop_2_self -> hop_3_caps
+  const moved = reorderDagNodes(p3, 'hop_2_self', 'earlier');
+  assert.deepEqual(
+    moved.nodes.map((n) => n.id),
+    ['hop_2_self', 'hop_1_broker', 'hop_3_caps'],
+  );
+  const check = validateDag(moved.nodes, moved.edges);
+  assert.equal(check.valid, true);
+  assert.deepEqual(check.order, ['hop_2_self', 'hop_1_broker', 'hop_3_caps']);
+
+  const movedBack = reorderDagNodes(moved, 'hop_2_self', 'later');
+  assert.deepEqual(
+    movedBack.nodes.map((n) => n.id),
+    ['hop_1_broker', 'hop_2_self', 'hop_3_caps'],
+  );
+});
+
+test('reorderDagNodes safely ignores out-of-bounds moves and unknown node ids', () => {
+  const p1 = safeClone(SAMPLE_PIPELINES[0]);
+  const noOpFirst = reorderDagNodes(p1, p1.nodes[0].id, 'earlier');
+  assert.deepEqual(
+    noOpFirst.nodes.map((n) => n.id),
+    p1.nodes.map((n) => n.id),
+  );
+  const noOpUnknown = reorderDagNodes(p1, 'nonexistent_hop', 'later');
+  assert.deepEqual(
+    noOpUnknown.nodes.map((n) => n.id),
+    p1.nodes.map((n) => n.id),
+  );
+});
+
+test('evaluateHopSlyBoundary strips unlisted keys, BYOK secrets, and PII values per hop', () => {
+  const audit = evaluateHopSlyBoundary(DEFAULT_HOP_SLY_CONTEXT, ['request_id', 'caller_origin']);
+  assert.deepEqual(audit.permittedKeys, ['request_id', 'caller_origin']);
+  assert.ok(audit.strippedKeys.includes('byok_api_key'));
+  assert.ok(audit.strippedKeys.includes('session_cookie'));
+  assert.ok(audit.strippedKeys.includes('user_email'));
+  assert.ok(audit.canaryAlerts.length >= 3);
+});
+
+test('detectSlyCanary recursively detects secret keys and tokens in nested structures', () => {
+  assert.ok(detectSlyCanary({ nested: [{ token: 'sk-1234567890abcdef1234' }] }));
+  assert.ok(detectSlyCanary({ sub: { ssn: '123-45-6789' } }));
+  assert.equal(detectSlyCanary({ request_id: 'mesh-req-2026', tags: ['a', 'b'] }), null);
+});
+
+test('compileWorkflowBundle excludes disabled hops from compiled .network.json and allowed_peers', () => {
+  const dagWithDisabled = toggleDagNode(SAMPLE_PIPELINES[0], 'hop_2_seal');
+  const compiled = compileWorkflowBundle(dagWithDisabled, { networkName: 'active_only_mesh' });
+  assert.equal(compiled.validation.ok, true);
+  assert.equal(compiled.networkJson.metadata.meshweave_dag.nodes.length, 2);
+  assert.ok(!compiled.networkJson.metadata.meshweave_dag.nodes.some((n) => n.id === 'hop_2_seal'));
+});
+
+test('buildShareableTrace signs with ECDSA P-256 and verifyShareableTrace verifies intact trace', async () => {
+  const pipeline = SAMPLE_PIPELINES[0];
+  const compiled = compileWorkflowBundle(pipeline, { networkName: 'signed_trace_mesh' });
+  const trace = await buildShareableTrace({
+    dag: pipeline,
+    runResults: [
+      {
+        nodeId: 'hop_1_egress',
+        status: 'PASSED',
+        transport: 'MessageChannel',
+        wireProtocol: 'nsdeploy-actions-v1',
+        handshakeMs: 12,
+        executeMs: 22,
+        latencyMs: 34,
+        slyAudit: evaluateHopSlyBoundary(DEFAULT_HOP_SLY_CONTEXT, ['request_id']),
+      },
+    ],
+    compiledBundle: compiled,
+    timestamp: '2026-11-23T00:00:00.000Z',
+  });
+  assert.equal(trace.signature?.algorithm, 'ECDSA-P256-SHA256');
+  assert.match(trace.signature?.signatureHex || '', /^[0-9a-f]+$/);
+  const res = await verifyShareableTrace(trace);
+  assert.equal(res.valid, true);
+});
+
+test('verifyShareableTrace fails closed on 1-byte payload tampering and forged ECDSA signature', async () => {
+  const pipeline = SAMPLE_PIPELINES[0];
+  const compiled = compileWorkflowBundle(pipeline, { networkName: 'tamper_check_mesh' });
+  const trace = await buildShareableTrace({
+    dag: pipeline,
+    runResults: [{ nodeId: 'hop_1_egress', status: 'PASSED', transport: 'MessageChannel', latencyMs: 15 }],
+    compiledBundle: compiled,
+  });
+
+  const tamperedPayload = safeClone(trace);
+  tamperedPayload.workflowName = `${tamperedPayload.workflowName}!`;
+  const payloadCheck = await verifyShareableTrace(tamperedPayload);
+  assert.equal(payloadCheck.valid, false);
+  assert.match(payloadCheck.reason, /SHA-256 mismatch/i);
+
+  const forgedSig = safeClone(trace);
+  const firstHex = forgedSig.signature.signatureHex[0];
+  forgedSig.signature.signatureHex = `${firstHex === 'a' ? 'b' : 'a'}${forgedSig.signature.signatureHex.slice(1)}`;
+  const sigCheck = await verifyShareableTrace(forgedSig);
+  assert.equal(sigCheck.valid, false);
+  assert.match(sigCheck.reason, /signature verification failed/i);
+});
+
+test('compileUnifiedBundle packages networkJson, manifestJson, linksJson, and signed traceJson', async () => {
+  const pipeline = SAMPLE_PIPELINES[0];
+  const compiled = compileWorkflowBundle(pipeline, { networkName: 'unified_mesh' });
+  const trace = await buildShareableTrace({
+    dag: pipeline,
+    runResults: [{ nodeId: 'hop_1_egress', status: 'PASSED', transport: 'MessageChannel', latencyMs: 25 }],
+    compiledBundle: compiled,
+  });
+  const bundle = compileUnifiedBundle({ compiledBundle: compiled, trace });
+  assert.equal(bundle.schema, 'meshweave/unified-bundle/v1');
+  assert.equal(bundle.artifacts.networkFileName, 'unified_mesh.network.json');
+  assert.equal(bundle.artifacts.manifestJson.networks[0].name, 'unified_mesh');
+  assert.equal(bundle.artifacts.linksJson.version, 1);
+  assert.equal(bundle.artifacts.traceJson.traceSha256, trace.traceSha256);
+});
+
+test('auditComposableBundle scores 100% on valid DAG + signed trace and flags invalid inputs', async () => {
+  const pipeline = SAMPLE_PIPELINES[0];
+  const compiled = compileWorkflowBundle(pipeline, { networkName: 'audit_ok_mesh' });
+  const trace = await buildShareableTrace({ dag: pipeline, runResults: [], compiledBundle: compiled });
+  const verified = await verifyShareableTrace(trace);
+  const passReport = auditComposableBundle({
+    dag: pipeline,
+    compiledBundle: compiled,
+    trace,
+    traceVerified: verified.valid,
+  });
+  assert.equal(passReport.score, 100);
+  assert.equal(passReport.passedAll, true);
+
+  const brokenBundle = safeClone(compiled);
+  brokenBundle.manifestJson.allowed_peers.push('http://insecure-remote.example');
+  const failReport = auditComposableBundle({
+    dag: { nodes: [{ id: 'a' }], edges: [{ id: 'loop', from: 'a', to: 'a' }] },
+    compiledBundle: brokenBundle,
+    trace,
+    traceVerified: false,
+  });
+  assert.equal(failReport.passedAll, false);
+  assert.ok(failReport.score < 80);
+});
+
+test('validateBridgeInboundFrame rejects opaque "null" origin frames fail-closed', () => {
+  const res = validateBridgeInboundFrame({ eventOrigin: 'null', type: 'connect' });
+  assert.equal(res.accepted, false);
+  assert.equal(res.code, 'ERR_NULL_ORIGIN_REJECTED');
+});
+
+test('validateBridgeInboundFrame rejects rogue frame when event.source mismatches peer', () => {
+  const res = validateBridgeInboundFrame({
+    eventOrigin: 'https://cocvn157.github.io',
+    sourceMatchesPeer: false,
+    type: 'connect',
+  });
+  assert.equal(res.accepted, false);
+  assert.equal(res.code, 'ERR_ROGUE_SOURCE_REJECTED');
+});
+
+test('validateBridgeInboundFrame rejects untrusted caller origins outside callerOrigins allowlist', () => {
+  const res = validateBridgeInboundFrame({
+    eventOrigin: 'https://evil-attacker.invalid',
+    allowedCallerOrigins: ['https://cocvn157.github.io', 'https://worldwideagenticweb.org'],
+    type: 'connect',
+  });
+  assert.equal(res.accepted, false);
+  assert.equal(res.code, 'ERR_UNTRUSTED_CALLER_ORIGIN');
+});
+
+test('validateBridgeInboundFrame rejects non-standard protocol and missing MessagePort on connect', () => {
+  const badProto = validateBridgeInboundFrame({
+    eventOrigin: 'https://cocvn157.github.io',
+    protocol: 'rogue-bridge/v0',
+    type: 'connect',
+  });
+  assert.equal(badProto.accepted, false);
+  assert.equal(badProto.code, 'ERR_PROTOCOL_MISMATCH');
+
+  const noPort = validateBridgeInboundFrame({
+    eventOrigin: 'https://cocvn157.github.io',
+    type: 'connect',
+    portsCount: 0,
+  });
+  assert.equal(noPort.accepted, false);
+  assert.equal(noPort.code, 'ERR_MISSING_MESSAGE_PORT');
+});
+
+test('validateBridgeInboundFrame rejects hidden-iframe write escalations fail-closed', () => {
+  const res = validateBridgeInboundFrame({
+    eventOrigin: 'https://cocvn157.github.io',
+    type: 'execute',
+    actionEffect: 'write',
+    isTopLevelWindow: false,
+    requestId: 'req-write-99',
+  });
+  assert.equal(res.accepted, false);
+  assert.equal(res.code, 'ERR_WRITE_REQUIRES_TOP_LEVEL');
+});
+
+test('validateBridgeInboundFrame rejects local-only actions and duplicate requestId replay attacks', () => {
+  const localOnly = validateBridgeInboundFrame({
+    eventOrigin: 'https://cocvn157.github.io',
+    type: 'execute',
+    actionAvailability: 'local-only',
+    requestId: 'req-1',
+  });
+  assert.equal(localOnly.accepted, false);
+  assert.equal(localOnly.code, 'ERR_LOCAL_ONLY_ACTION');
+
+  const replay = validateBridgeInboundFrame({
+    eventOrigin: 'https://cocvn157.github.io',
+    type: 'execute',
+    actionEffect: 'read',
+    requestId: 'req-dup-1',
+    seenRequestIds: new Set(['req-dup-1']),
+  });
+  assert.equal(replay.accepted, false);
+  assert.equal(replay.code, 'ERR_REPLAY_REQUEST_ID');
+
+  const ok = validateBridgeInboundFrame({
+    eventOrigin: 'https://cocvn157.github.io',
+    type: 'execute',
+    actionEffect: 'read',
+    requestId: 'req-fresh-2',
+    seenRequestIds: new Set(['req-dup-1']),
+  });
+  assert.equal(ok.accepted, true);
+  assert.equal(ok.code, 'OK_BRIDGE_AUTHORIZED');
+});
+
+test('simulateRogueFrameAttack verifies all fail-closed ActionBridge defense vectors cleanly', async () => {
+  const drill = await simulateRogueFrameAttack('https://cocvn157.github.io/meshweave-studio/bridge/action-bridge.html');
+  assert.equal(drill.allRejectedFailClosed, true);
+  assert.equal(drill.vectors.length, 3);
+  assert.ok(drill.vectors.every((v) => v.passedFailClosed));
+});
+
+test('index.html has inline SVG favicon, ARIA roles, and deploy workflow stages all modules', async () => {
+  const html = await readFile(path.join(ROOT, 'index.html'), 'utf8');
+  assert.match(html, /rel="icon"\s+type="image\/svg\+xml"/i);
+  assert.match(html, /role="tablist"/i);
+  assert.match(html, /role="tabpanel"/i);
+  assert.match(html, /aria-live="polite"/i);
+
+  const deployYml = await readFile(path.join(ROOT, '.github/workflows/deploy.yml'), 'utf8');
+  assert.match(deployYml, /\bsrc\b/);
+  assert.match(deployYml, /meshweave_composer\.network\.json/);
+  assert.match(deployYml, /\.well-known/);
 });

@@ -45,6 +45,8 @@ export const SAMPLE_PIPELINES = [
         bridgeUrl: 'https://cocvn157.github.io/scopegate-studio/bridge/action-bridge.html',
         actionName: 'evaluate_egress_policy',
         effect: 'read',
+        enabled: true,
+        slyAllowlist: ['request_id', 'caller_origin'],
         staticArgs: {
           targetUrl: 'https://shutdown-clerk.pages.dev/shutdown_clerk',
           effect: 'read',
@@ -87,6 +89,8 @@ export const SAMPLE_PIPELINES = [
         bridgeUrl: 'https://cocvn157.github.io/nanda-seal/bridge/action-bridge.html',
         actionName: 'inspect_remote_site',
         effect: 'read',
+        enabled: true,
+        slyAllowlist: ['request_id'],
         staticArgs: {},
         inputSchema: {
           type: 'object',
@@ -133,6 +137,8 @@ export const SAMPLE_PIPELINES = [
         bridgeUrl: './bridge/action-bridge.html',
         actionName: 'compose_mesh_contract',
         effect: 'read',
+        enabled: true,
+        slyAllowlist: ['request_id'],
         staticArgs: {
           networkName: 'shutdown_clerk_verified_mesh',
           hops: [

@@ -48,8 +48,12 @@ export function normalizePartnerNetworkUrl(node, selfBaseUrl = 'https://cocvn157
  * Compile a MeshWeave DAG into valid MVP Profile 0.3 deployment files.
  */
 export function compileWorkflowBundle(dag, options = {}) {
-  const nodes = Array.isArray(dag?.nodes) ? dag.nodes : [];
-  const edges = Array.isArray(dag?.edges) ? dag.edges : [];
+  const allNodes = Array.isArray(dag?.nodes) ? dag.nodes : [];
+  const nodes = allNodes.filter((n) => n.enabled !== false);
+  const activeIds = new Set(nodes.map((n) => n.id));
+  const edges = (Array.isArray(dag?.edges) ? dag.edges : []).filter(
+    (e) => activeIds.has(e.from) && activeIds.has(e.to),
+  );
   const dagCheck = validateDag(nodes, edges);
 
   const networkName = sanitizeIdentifier(options.networkName || dag?.id || 'composed_mesh_workflow');
@@ -329,10 +333,42 @@ export function validateCompiledBundle({ networkJson, manifestJson, dagCheck, no
   };
 }
 
+let cachedSigningKeyPairPromise = null;
+
+function toHex(buf) {
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function fromHex(hex) {
+  const clean = hex.length % 2 === 0 ? hex : `0${hex}`;
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i += 1) {
+    out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+async function getTraceSigningKeys() {
+  if (!globalThis.crypto?.subtle) return null;
+  if (!cachedSigningKeyPairPromise) {
+    cachedSigningKeyPairPromise = globalThis.crypto.subtle.generateKey(
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true,
+      ['sign', 'verify'],
+    );
+  }
+  return cachedSigningKeyPairPromise;
+}
+
 /**
- * Create a shareable execution trace with canonical SHA-256 integrity digest.
+ * Create a shareable execution trace with canonical SHA-256 digest and ECDSA P-256 signature.
  */
-export async function buildShareableTrace({ dag, runResults = [], compiledBundle, timestamp = new Date().toISOString() }) {
+export async function buildShareableTrace({
+  dag,
+  runResults = [],
+  compiledBundle,
+  timestamp = new Date().toISOString(),
+}) {
   const payload = {
     schema: 'meshweave/execution-trace/v1',
     mvpProfile: '0.3',
@@ -340,19 +376,112 @@ export async function buildShareableTrace({ dag, runResults = [], compiledBundle
     workflowId: dag?.id || 'custom_dag',
     workflowName: dag?.name || 'Custom Multi-Hop Workflow',
     nodeCount: Array.isArray(dag?.nodes) ? dag.nodes.length : 0,
+    enabledNodeCount: Array.isArray(dag?.nodes)
+      ? dag.nodes.filter((n) => n.enabled !== false).length
+      : 0,
     edgeCount: Array.isArray(dag?.edges) ? dag.edges.length : 0,
     allowedPeers: compiledBundle?.manifestJson?.allowed_peers || [],
     hops: safeClone(runResults),
     summary: {
       passed: runResults.filter((r) => r.status === 'PASSED').length,
       failed: runResults.filter((r) => r.status === 'FAILED').length,
+      disabled: runResults.filter((r) => r.status === 'DISABLED').length,
       liveBridgeHops: runResults.filter((r) => r.transport === 'MessageChannel').length,
       totalLatencyMs: runResults.reduce((sum, r) => sum + (Number(r.latencyMs) || 0), 0),
+      strippedSlyKeysTotal: runResults.reduce(
+        (sum, r) => sum + (r.slyAudit?.strippedKeys?.length || 0),
+        0,
+      ),
     },
   };
   const digest = await sha256Hex(canonicalJson(payload));
+  let signature = null;
+  const keys = await getTraceSigningKeys();
+  if (keys) {
+    const sigBuf = await globalThis.crypto.subtle.sign(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      keys.privateKey,
+      new TextEncoder().encode(digest),
+    );
+    const publicJwk = await globalThis.crypto.subtle.exportKey('jwk', keys.publicKey);
+    signature = {
+      algorithm: 'ECDSA-P256-SHA256',
+      publicJwk,
+      signatureHex: toHex(sigBuf),
+    };
+  }
   return {
     ...payload,
     traceSha256: digest,
+    signature,
+  };
+}
+
+/**
+ * Independently verify a signed meshweave-trace.json artifact using its embedded ECDSA P-256 publicJwk.
+ */
+export async function verifyShareableTrace(trace) {
+  if (!trace || typeof trace !== 'object' || !trace.traceSha256) {
+    return { valid: false, reason: 'Missing trace payload or traceSha256.' };
+  }
+  const { traceSha256, signature, ...payload } = trace;
+  const recomputed = await sha256Hex(canonicalJson(payload));
+  if (recomputed !== traceSha256) {
+    return {
+      valid: false,
+      reason: `SHA-256 mismatch: expected ${traceSha256.slice(0, 14)}…, computed ${recomputed.slice(0, 14)}…`,
+    };
+  }
+  if (!signature?.publicJwk || !signature?.signatureHex) {
+    return { valid: false, reason: 'Missing ECDSA P-256 signature block.' };
+  }
+  if (!globalThis.crypto?.subtle) {
+    return { valid: false, reason: 'Web Crypto SubtleCrypto unavailable for ECDSA verification.' };
+  }
+  try {
+    const pubKey = await globalThis.crypto.subtle.importKey(
+      'jwk',
+      signature.publicJwk,
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      false,
+      ['verify'],
+    );
+    const ok = await globalThis.crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      pubKey,
+      fromHex(signature.signatureHex),
+      new TextEncoder().encode(traceSha256),
+    );
+    return ok
+      ? {
+          valid: true,
+          reason: `Verified ECDSA P-256 signature + SHA-256 (${traceSha256.slice(0, 14)}…)`,
+        }
+      : { valid: false, reason: 'ECDSA P-256 signature verification failed.' };
+  } catch (err) {
+    return {
+      valid: false,
+      reason: `Signature verification error: ${err?.message || String(err)}`,
+    };
+  }
+}
+
+/**
+ * Build a unified 1-click exportable bundle combining .network.json, agent-manifest.json, links.json, and signed trace.
+ */
+export function compileUnifiedBundle({ compiledBundle, trace }) {
+  return {
+    schema: 'meshweave/unified-bundle/v1',
+    mvpProfile: '0.3',
+    exportedAt: trace?.generatedAt || new Date().toISOString(),
+    networkName: compiledBundle?.networkName || 'composed_mesh_workflow',
+    validation: compiledBundle?.validation || { ok: false, errors: [], warnings: [] },
+    artifacts: {
+      networkFileName: `${compiledBundle?.networkName || 'composed_mesh_workflow'}.network.json`,
+      networkJson: compiledBundle?.networkJson || {},
+      manifestJson: compiledBundle?.manifestJson || {},
+      linksJson: compiledBundle?.linksJson || {},
+      traceJson: trace || null,
+    },
   };
 }

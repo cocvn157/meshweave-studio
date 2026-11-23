@@ -2,14 +2,29 @@
  * MeshWeave Studio — Main UI Application Controller
  */
 
-import { executeDagWorkflow, probeBridgeChannel, resolveAbsoluteUrl } from './bridge-runner.js';
 import {
+  executeDagWorkflow,
+  probeBridgeChannel,
+  resolveAbsoluteUrl,
+  simulateRogueFrameAttack,
+} from './bridge-runner.js';
+import { auditComposableBundle } from './bridge-security.js';
+import {
+  DEFAULT_HOP_SLY_CONTEXT,
   evaluateEdgeContract,
+  evaluateHopSlyBoundary,
   evaluateNodeInputs,
+  reorderDagNodes,
   safeClone,
+  toggleDagNode,
   validateDag,
 } from './dag-engine.js';
-import { buildShareableTrace, compileWorkflowBundle } from './mesh-compiler.js';
+import {
+  buildShareableTrace,
+  compileUnifiedBundle,
+  compileWorkflowBundle,
+  verifyShareableTrace,
+} from './mesh-compiler.js';
 import { PARTNER_PRESETS, SAMPLE_PIPELINES } from './presets.js';
 import { ECOSYSTEM_DIRECTORY, probeSiteArtifacts } from './prober.js';
 
@@ -43,6 +58,8 @@ const state = {
   activeArtifact: 'network',
   lastCompiled: null,
   lastTrace: null,
+  lastUnifiedBundle: null,
+  lastTraceVerified: null,
   discovery: {
     url: 'https://cocvn157.github.io/nanda-seal',
     loading: false,
@@ -69,6 +86,8 @@ const dom = {
   dagEdgesSvg: document.getElementById('dag-edges-svg'),
   dagColumns: document.getElementById('dag-columns'),
   edgeBadgesLayer: document.getElementById('edge-badges-layer'),
+  waterfallSummaryPill: document.getElementById('waterfall-summary-pill'),
+  waterfallList: document.getElementById('waterfall-list'),
   inspectorContent: document.getElementById('inspector-content'),
   probeUrlInput: document.getElementById('probe-url-input'),
   btnProbeSingle: document.getElementById('btn-probe-single'),
@@ -86,16 +105,26 @@ const dom = {
   compileMessages: document.getElementById('compile-messages'),
   artifactPreview: document.getElementById('artifact-preview'),
   subtabs: [...document.querySelectorAll('.subtab')],
+  btnVerifyTrace: document.getElementById('btn-verify-trace'),
   btnCopyArtifact: document.getElementById('btn-copy-artifact'),
   btnDownloadArtifact: document.getElementById('btn-download-artifact'),
+  btnDownloadUnified: document.getElementById('btn-download-unified'),
+  selfAuditPill: document.getElementById('self-audit-pill'),
+  selfAuditList: document.getElementById('self-audit-list'),
+  btnRunSelfAudit: document.getElementById('btn-run-self-audit'),
+  rogueDrillPill: document.getElementById('rogue-drill-pill'),
+  rogueDrillResults: document.getElementById('rogue-drill-results'),
+  btnSimulateRogue: document.getElementById('btn-simulate-rogue'),
 };
 
-function switchTab(tabId) {
+function switchTab(tabId, focusTab = false) {
   state.activeTab = tabId;
   for (const btn of dom.tabs) {
     const active = btn.dataset.tab === tabId;
     btn.classList.toggle('active', active);
     btn.setAttribute('aria-selected', String(active));
+    btn.tabIndex = active ? 0 : -1;
+    if (active && focusTab) btn.focus();
   }
   for (const panel of dom.panels) {
     panel.classList.toggle('active', panel.id === `tab-${tabId}`);
@@ -117,13 +146,141 @@ function loadPipelinePreset(presetId) {
   void refreshExportTab();
 }
 
-function getNodeStatusBadge(nodeId) {
-  const rec = state.runState.get(nodeId);
+function getNodeStatusBadge(node) {
+  const rec = state.runState.get(node.id);
+  if (node.enabled === false && !rec) return { cls: 'warn', text: 'DISABLED' };
   if (!rec) return { cls: 'neutral', text: 'READY' };
   if (rec.status === 'RUNNING') return { cls: 'running', text: 'RUNNING…' };
   if (rec.status === 'PASSED') return { cls: 'pass', text: `PASSED · ${rec.latencyMs}ms` };
+  if (rec.status === 'DISABLED') return { cls: 'warn', text: 'DISABLED' };
   if (rec.status === 'SKIPPED') return { cls: 'warn', text: 'SKIPPED' };
   return { cls: 'fail', text: 'FAILED' };
+}
+
+function renderWaterfallTracer(dagCheck, nodeById) {
+  const orderedIds = dagCheck.order.length ? dagCheck.order : state.dag.nodes.map((n) => n.id);
+  const records = orderedIds.map((id, idx) => {
+    const node = nodeById.get(id);
+    const rec = state.runState.get(id);
+    const incoming = state.dag.edges.filter((e) => e.to === id);
+    const edgeStatuses = incoming.map((e) =>
+      evaluateEdgeContract(nodeById.get(e.from), node, e.mappings || []).status,
+    );
+    const schemaStatus =
+      rec?.schemaStatus ||
+      (edgeStatuses.length === 0
+        ? 'ROOT'
+        : edgeStatuses.includes('MISMATCH')
+          ? 'MISMATCH'
+          : edgeStatuses.includes('COERCIBLE')
+            ? 'COERCIBLE'
+            : edgeStatuses.includes('UNVERIFIED')
+              ? 'UNVERIFIED'
+              : 'MATCH');
+    const slyAudit =
+      rec?.slyAudit ||
+      evaluateHopSlyBoundary(node?.proposedSlyData || DEFAULT_HOP_SLY_CONTEXT, node?.slyAllowlist || []);
+    return { idx, node, rec, schemaStatus, slyAudit };
+  });
+
+  const maxRtt = Math.max(
+    1,
+    ...records.map((r) => Math.max(1, Number(r.rec?.latencyMs) || 0)),
+  );
+  const totalRtt = records.reduce((s, r) => s + (Number(r.rec?.latencyMs) || 0), 0);
+  const liveCount = records.filter((r) => r.rec?.status === 'PASSED').length;
+  const totalStripped = records.reduce((s, r) => s + (r.slyAudit?.strippedKeys?.length || 0), 0);
+
+  if (state.runState.size === 0) {
+    dom.waterfallSummaryPill.className = 'pill neutral';
+    dom.waterfallSummaryPill.textContent = `${records.length} hop(s) staged · ${totalStripped} sly keys guarded`;
+  } else {
+    dom.waterfallSummaryPill.className = liveCount === records.filter((r) => r.node?.enabled !== false).length
+      ? 'pill pass'
+      : 'pill warn';
+    dom.waterfallSummaryPill.textContent = `${liveCount} live hop(s) · ${totalRtt}ms RTT · ${totalStripped} sly keys stripped`;
+  }
+
+  dom.waterfallList.replaceChildren();
+  for (const item of records) {
+    const { idx, node, rec, schemaStatus, slyAudit } = item;
+    if (!node) continue;
+    const handshakeMs = Number(rec?.handshakeMs) || 0;
+    const executeMs = Number(rec?.executeMs) || 0;
+    const latencyMs = Number(rec?.latencyMs) || 0;
+    const hsPct = rec?.status === 'PASSED' ? Math.max(4, Math.round((handshakeMs / maxRtt) * 100)) : 0;
+    const exPct = rec?.status === 'PASSED' ? Math.max(4, Math.round((executeMs / maxRtt) * 100)) : 0;
+
+    const protoLabel =
+      rec?.status === 'PASSED'
+        ? `${rec.wireProtocol} · ${rec.transport}`
+        : rec?.status === 'DISABLED' || node.enabled === false
+          ? 'DISABLED'
+          : rec?.status || 'STAGED (MessageChannel)';
+
+    const protoCls =
+      rec?.status === 'PASSED'
+        ? 'pass'
+        : rec?.status === 'FAILED'
+          ? 'fail'
+          : rec?.status === 'DISABLED' || node.enabled === false
+            ? 'warn'
+            : 'neutral';
+
+    const schemaCls =
+      schemaStatus === 'MISMATCH' ? 'fail' : schemaStatus === 'COERCIBLE' || schemaStatus === 'UNVERIFIED' ? 'warn' : 'pass';
+
+    dom.waterfallList.append(
+      el(
+        'div',
+        { className: 'waterfall-row' },
+        el(
+          'div',
+          { className: 'waterfall-top' },
+          el('span', {
+            className: 'waterfall-title',
+            textContent: `Hop ${idx + 1}: ${node.partnerLabel || node.networkName} → ${node.actionName}`,
+          }),
+          el(
+            'div',
+            { className: 'waterfall-badges' },
+            el('span', { className: `pill ${schemaCls}`, textContent: `Schema: ${schemaStatus}` }),
+            el('span', { className: `pill ${protoCls}`, textContent: protoLabel }),
+            el('span', {
+              className: 'pill neutral',
+              textContent: rec?.status === 'PASSED' ? `${latencyMs}ms` : node.enabled === false ? '0ms (OFF)' : 'pending',
+            }),
+          ),
+        ),
+        el(
+          'div',
+          {
+            className: 'waterfall-bar-track',
+            title: `Handshake ${handshakeMs}ms + Execute ${executeMs}ms = ${latencyMs}ms`,
+          },
+          hsPct > 0
+            ? el('div', { className: 'waterfall-seg-handshake', style: `width:${Math.min(100, hsPct)}%` })
+            : null,
+          exPct > 0
+            ? el('div', { className: 'waterfall-seg-execute', style: `width:${Math.min(100 - Math.min(100, hsPct), exPct)}%` })
+            : null,
+        ),
+        el(
+          'div',
+          { className: 'waterfall-meta' },
+          el('span', {
+            textContent:
+              rec?.status === 'PASSED'
+                ? `handshake: ${handshakeMs}ms · execute: ${executeMs}ms · total: ${latencyMs}ms`
+                : rec?.error || 'Ready for live hidden-iframe MessageChannel RPC',
+          }),
+          el('span', {
+            textContent: `sly_data kept=[${slyAudit.permittedKeys.join(', ') || 'none'}] · stripped=[${slyAudit.strippedKeys.join(', ') || 'none'}]`,
+          }),
+        ),
+      ),
+    );
+  }
 }
 
 function renderComposer() {
@@ -146,8 +303,9 @@ function renderComposer() {
     dom.dagStatusBanner.className = failedCount > 0 ? 'status-pill fail' : 'status-pill pass';
     dom.dagStatusBanner.textContent = `${passedCount}/${state.dag.nodes.length} hops executed live · ${totalMs}ms total`;
   } else {
+    const enabledCount = state.dag.nodes.filter((n) => n.enabled !== false).length;
     dom.dagStatusBanner.className = 'status-pill neutral';
-    dom.dagStatusBanner.textContent = `${state.dag.nodes.length} hops · ${state.dag.edges.length} edges · Acyclic DAG ready`;
+    dom.dagStatusBanner.textContent = `${enabledCount}/${state.dag.nodes.length} active hops · ${state.dag.edges.length} edges · Acyclic DAG ready`;
   }
 
   dom.dagColumns.replaceChildren();
@@ -155,11 +313,13 @@ function renderComposer() {
   layers.forEach((layerNodes, layerIdx) => {
     const col = el('div', { className: 'dag-column' }, el('div', { className: 'layer-label', textContent: `Hop Layer ${layerIdx + 1}` }));
     for (const node of layerNodes) {
+      const nodeIdx = state.dag.nodes.findIndex((n) => n.id === node.id);
       const incoming = state.dag.edges.filter((e) => e.to === node.id);
       const inputEval = evaluateNodeInputs(node, incoming, nodeById);
       const rec = state.runState.get(node.id);
-      const badge = getNodeStatusBadge(node.id);
+      const badge = getNodeStatusBadge(node);
       const selected = state.selection.type === 'node' && state.selection.id === node.id;
+      const isDisabled = node.enabled === false;
 
       let previewText = `args: ${JSON.stringify(node.staticArgs || {})}`;
       if (rec?.status === 'PASSED') {
@@ -171,7 +331,7 @@ function renderComposer() {
       const card = el(
         'div',
         {
-          className: `hop-card${selected ? ' selected' : ''}${
+          className: `hop-card${selected ? ' selected' : ''}${isDisabled ? ' status-disabled' : ''}${
             rec?.status === 'PASSED'
               ? ' status-passed'
               : rec?.status === 'FAILED'
@@ -180,10 +340,20 @@ function renderComposer() {
                   ? ' status-running'
                   : ''
           }`,
+          tabindex: '0',
+          role: 'button',
+          'aria-label': `Select hop ${node.partnerLabel || node.networkName} ${node.actionName}`,
           dataset: { nodeId: node.id },
           onClick: () => {
             state.selection = { type: 'node', id: node.id };
             renderComposer();
+          },
+          onKeydown: (ev) => {
+            if (ev.key === 'Enter' || ev.key === ' ') {
+              ev.preventDefault();
+              state.selection = { type: 'node', id: node.id };
+              renderComposer();
+            }
           },
         },
         el(
@@ -201,17 +371,64 @@ function renderComposer() {
             className: `pill ${inputEval.ready ? 'pass' : 'warn'}`,
             textContent: inputEval.ready ? 'CONTRACT OK' : `MISSING: ${inputEval.missingRequired.join(',') || 'EDGE'}`,
           }),
-          rec?.wireProtocol
+          rec?.wireProtocol && rec.wireProtocol !== 'none'
             ? el('span', { className: 'pill neutral', textContent: rec.wireProtocol })
             : null,
         ),
         el('div', { className: 'hop-preview', textContent: previewText }),
+        el(
+          'div',
+          { className: 'hop-controls' },
+          el('button', {
+            type: 'button',
+            className: 'hop-ctrl-btn',
+            disabled: nodeIdx <= 0 || state.runningDag,
+            title: 'Move hop earlier in DAG',
+            textContent: '← Earlier',
+            onClick: (ev) => {
+              ev.stopPropagation();
+              state.dag = reorderDagNodes(state.dag, node.id, 'earlier');
+              state.runState.clear();
+              renderComposer();
+              void refreshExportTab();
+            },
+          }),
+          el('button', {
+            type: 'button',
+            className: `hop-ctrl-btn${isDisabled ? ' off' : ''}`,
+            disabled: state.runningDag,
+            title: 'Toggle hop active/bypassed',
+            textContent: isDisabled ? 'OFF' : 'ON',
+            onClick: (ev) => {
+              ev.stopPropagation();
+              state.dag = toggleDagNode(state.dag, node.id);
+              state.runState.clear();
+              renderComposer();
+              void refreshExportTab();
+            },
+          }),
+          el('button', {
+            type: 'button',
+            className: 'hop-ctrl-btn',
+            disabled: nodeIdx >= state.dag.nodes.length - 1 || state.runningDag,
+            title: 'Move hop later in DAG',
+            textContent: 'Later →',
+            onClick: (ev) => {
+              ev.stopPropagation();
+              state.dag = reorderDagNodes(state.dag, node.id, 'later');
+              state.runState.clear();
+              renderComposer();
+              void refreshExportTab();
+            },
+          }),
+        ),
       );
       col.append(card);
     }
     dom.dagColumns.append(col);
   });
 
+  renderWaterfallTracer(dagCheck, nodeById);
   renderInspector(nodeById);
   requestAnimationFrame(drawDagEdges);
 }
@@ -282,9 +499,9 @@ function drawDagEdges() {
       ? maps.map((m) => `${m.sourcePath}→${m.targetArg}`).join(', ')
       : 'sequence';
     const compactLabel =
-      maps.length > 1
-        ? `${maps.length} bindings · ${contract.status}`
-        : `${fullLabel} · ${contract.status}`;
+      maps.length > 0
+        ? `${contract.status} (${maps.length})`
+        : 'sequence';
 
     const badge = el('button', {
       type: 'button',
@@ -335,12 +552,24 @@ function renderNodeInspector(node, nodeById) {
   const rec = state.runState.get(node.id);
   const incoming = state.dag.edges.filter((e) => e.to === node.id);
   const inputEval = evaluateNodeInputs(node, incoming, nodeById);
+  const slyAudit =
+    rec?.slyAudit ||
+    evaluateHopSlyBoundary(node.proposedSlyData || DEFAULT_HOP_SLY_CONTEXT, node.slyAllowlist || []);
+
   const argsInput = el('textarea', {
     className: 'textarea',
-    rows: 5,
-    textContent: JSON.stringify(node.staticArgs || {}, null, 2),
+    rows: 4,
+    'aria-label': 'Static input arguments JSON',
   });
   argsInput.value = JSON.stringify(node.staticArgs || {}, null, 2);
+
+  const slyInput = el('input', {
+    className: 'input',
+    type: 'text',
+    placeholder: 'request_id, caller_origin',
+    'aria-label': 'Allowed sly_data keys for this hop',
+  });
+  slyInput.value = (node.slyAllowlist || []).join(', ');
 
   const errorLine = el('div', { className: 'muted', textContent: '' });
 
@@ -351,6 +580,7 @@ function renderNodeInspector(node, nodeById) {
       el('h3', { textContent: `Hop Inspector · ${node.id}` }),
       state.dag.nodes.length > 1
         ? el('button', {
+            type: 'button',
             className: 'btn sm danger',
             textContent: 'Remove Hop',
             onClick: () => {
@@ -380,10 +610,17 @@ function renderNodeInspector(node, nodeById) {
           ? 'All required inputs & edge schemas satisfied'
           : `Missing: ${inputEval.missingRequired.join(', ') || 'schema mismatch'}`,
       }),
+      el('span', { className: 'kv-key', textContent: 'sly_data' }),
+      el('span', {
+        className: 'kv-val',
+        textContent: `kept=[${slyAudit.permittedKeys.join(', ') || 'none'}] · stripped=[${slyAudit.strippedKeys.join(', ') || 'none'}]`,
+      }),
     ),
     el(
       'div',
       { className: 'inspector-section form-stack' },
+      el('span', { className: 'field-label', textContent: 'Hop sly_data Allowlist (comma-separated)' }),
+      slyInput,
       el('span', { className: 'field-label', textContent: 'Static Input Arguments (JSON)' }),
       argsInput,
       errorLine,
@@ -391,13 +628,18 @@ function renderNodeInspector(node, nodeById) {
         'div',
         { className: 'btn-row' },
         el('button', {
+          type: 'button',
           className: 'btn sm secondary',
-          textContent: 'Apply Static Args',
+          textContent: 'Apply Hop Settings',
           onClick: () => {
             try {
               const parsed = JSON.parse(argsInput.value || '{}');
               node.staticArgs = parsed;
-              errorLine.textContent = 'Saved staticArgs.';
+              node.slyAllowlist = slyInput.value
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean);
+              errorLine.textContent = 'Saved staticArgs & sly_data allowlist.';
               renderComposer();
               void refreshExportTab();
             } catch (e) {
@@ -421,6 +663,7 @@ function renderNodeInspector(node, nodeById) {
                 wireProtocol: rec.wireProtocol,
                 handshakeMs: rec.handshakeMs,
                 executeMs: rec.executeMs,
+                slyAudit: rec.slyAudit,
                 appliedBindings: rec.appliedBindings,
                 output: rec.output,
                 error: rec.error,
@@ -463,6 +706,7 @@ function renderEdgeInspector(edge, nodeById) {
           'div',
           { className: 'btn-row', style: 'margin-top:6px' },
           el('button', {
+            type: 'button',
             className: 'btn sm danger',
             textContent: 'Remove Mapping',
             onClick: () => {
@@ -482,6 +726,7 @@ function renderEdgeInspector(edge, nodeById) {
       { className: 'inspector-header' },
       el('h3', { textContent: `Edge Contract · ${edge.from} → ${edge.to}` }),
       el('button', {
+        type: 'button',
         className: 'btn sm danger',
         textContent: 'Delete Edge',
         onClick: () => {
@@ -508,6 +753,7 @@ function renderEdgeInspector(edge, nodeById) {
       srcInput,
       dstInput,
       el('button', {
+        type: 'button',
         className: 'btn sm primary',
         textContent: 'Add Field Mapping',
         onClick: () => {
@@ -538,6 +784,7 @@ function renderAddHopInspector() {
   for (const p of PARTNER_PRESETS) {
     chips.append(
       el('button', {
+        type: 'button',
         className: 'chip',
         textContent: p.label,
         onClick: () => {
@@ -578,6 +825,7 @@ function renderAddHopInspector() {
       { className: 'inspector-header' },
       el('h3', { textContent: 'Discover & Add Partner Bridge Hop' }),
       el('button', {
+        type: 'button',
         className: 'btn sm ghost',
         textContent: 'Close',
         onClick: () => {
@@ -593,6 +841,7 @@ function renderAddHopInspector() {
       urlInput,
       chips,
       el('button', {
+        type: 'button',
         className: 'btn primary',
         disabled: state.discovery.loading,
         textContent: state.discovery.loading ? 'Connecting over MessageChannel…' : 'Discover Bridge Catalog',
@@ -647,6 +896,7 @@ function renderAddHopInspector() {
       el('span', { className: 'field-label', textContent: 'Initial Static Arguments (JSON)' }),
       argsBox,
       el('button', {
+        type: 'button',
         className: 'btn primary',
         textContent: 'Add Hop to DAG',
         onClick: () => {
@@ -667,6 +917,8 @@ function renderAddHopInspector() {
             bridgeUrl: probe.bridgeUrl,
             actionName: picked.name,
             effect: picked.effect || 'read',
+            enabled: true,
+            slyAllowlist: ['request_id'],
             staticArgs: parsedArgs,
             inputSchema: picked.inputSchema || { type: 'object', properties: {} },
             outputSchema: picked.outputSchema || null,
@@ -706,6 +958,7 @@ function renderAddEdgeInspector() {
       { className: 'inspector-header' },
       el('h3', { textContent: 'Wire New DAG Edge' }),
       el('button', {
+        type: 'button',
         className: 'btn sm ghost',
         textContent: 'Close',
         onClick: () => {
@@ -727,6 +980,7 @@ function renderAddEdgeInspector() {
       dstArg,
       msg,
       el('button', {
+        type: 'button',
         className: 'btn primary',
         textContent: 'Create Edge',
         onClick: () => {
@@ -934,6 +1188,70 @@ async function runEcosystemMatrix() {
   state.matrixBusy = false;
 }
 
+function renderSelfAudit() {
+  if (!state.lastCompiled) return;
+  const audit = auditComposableBundle({
+    dag: state.dag,
+    compiledBundle: state.lastCompiled,
+    trace: state.lastTrace,
+    traceVerified: state.lastTraceVerified?.valid ?? null,
+  });
+
+  dom.selfAuditPill.className = `pill ${audit.passedAll ? 'pass' : 'warn'}`;
+  dom.selfAuditPill.textContent = `${audit.score}% (${audit.passedCount}/${audit.totalCount} PASS)`;
+
+  dom.selfAuditList.replaceChildren();
+  for (const chk of audit.checks) {
+    dom.selfAuditList.append(
+      el(
+        'div',
+        { className: 'check-card' },
+        el(
+          'div',
+          { className: 'check-card-top' },
+          el('span', { textContent: chk.label }),
+          el('span', { className: `pill ${chk.passed ? 'pass' : 'fail'}`, textContent: chk.passed ? 'PASS' : 'FAIL' }),
+        ),
+        el('div', { className: 'check-card-detail', textContent: chk.detail }),
+      ),
+    );
+  }
+}
+
+async function runRogueSecurityDrill() {
+  dom.rogueDrillPill.className = 'pill running';
+  dom.rogueDrillPill.textContent = 'Running live frame probes…';
+  const report = await simulateRogueFrameAttack('./bridge/action-bridge.html');
+
+  dom.rogueDrillPill.className = `pill ${report.allRejectedFailClosed ? 'pass' : 'fail'}`;
+  dom.rogueDrillPill.textContent = report.allRejectedFailClosed
+    ? `ALL ${report.vectors.length} ATTACKS REJECTED FAIL-CLOSED`
+    : 'SECURITY FAILURE DETECTED';
+
+  dom.rogueDrillResults.replaceChildren();
+  for (const vec of report.vectors) {
+    dom.rogueDrillResults.append(
+      el(
+        'div',
+        { className: 'check-card' },
+        el(
+          'div',
+          { className: 'check-card-top' },
+          el('span', { textContent: vec.label }),
+          el('span', {
+            className: `pill ${vec.passedFailClosed ? 'pass' : 'fail'}`,
+            textContent: vec.passedFailClosed ? 'FAIL-CLOSED' : 'EXPOSED',
+          }),
+        ),
+        el('div', {
+          className: 'check-card-detail',
+          textContent: `[${vec.code}] ${vec.detail}`,
+        }),
+      ),
+    );
+  }
+}
+
 async function refreshExportTab() {
   const compiled = compileWorkflowBundle(state.dag, {
     networkName: dom.cfgNetworkName.value,
@@ -952,6 +1270,8 @@ async function refreshExportTab() {
     compiledBundle: compiled,
   });
   state.lastTrace = trace;
+  state.lastTraceVerified = await verifyShareableTrace(trace);
+  state.lastUnifiedBundle = compileUnifiedBundle({ compiledBundle: compiled, trace });
 
   const { ok, errors, warnings } = compiled.validation;
   dom.compileBadge.className = `pill ${ok ? 'pass' : 'fail'}`;
@@ -963,6 +1283,7 @@ async function refreshExportTab() {
   dom.compileMessages.textContent = msgs.join(' | ');
 
   renderActiveArtifactPreview();
+  renderSelfAudit();
 }
 
 function renderActiveArtifactPreview() {
@@ -971,6 +1292,7 @@ function renderActiveArtifactPreview() {
   if (state.activeArtifact === 'manifest') obj = state.lastCompiled.manifestJson;
   else if (state.activeArtifact === 'links') obj = state.lastCompiled.linksJson;
   else if (state.activeArtifact === 'trace') obj = state.lastTrace;
+  else if (state.activeArtifact === 'bundle') obj = state.lastUnifiedBundle;
   dom.artifactPreview.textContent = JSON.stringify(obj, null, 2);
 }
 
@@ -991,9 +1313,21 @@ async function initSelfBridgeBadge() {
 }
 
 function wireEvents() {
-  for (const tab of dom.tabs) {
+  dom.tabs.forEach((tab, idx) => {
     tab.addEventListener('click', () => switchTab(tab.dataset.tab));
-  }
+    tab.addEventListener('keydown', (ev) => {
+      let next = -1;
+      if (ev.key === 'ArrowRight') next = (idx + 1) % dom.tabs.length;
+      else if (ev.key === 'ArrowLeft') next = (idx - 1 + dom.tabs.length) % dom.tabs.length;
+      else if (ev.key === 'Home') next = 0;
+      else if (ev.key === 'End') next = dom.tabs.length - 1;
+      if (next >= 0) {
+        ev.preventDefault();
+        switchTab(dom.tabs[next].dataset.tab, true);
+      }
+    });
+  });
+
   for (const p of SAMPLE_PIPELINES) {
     dom.pipelineSelect.append(el('option', { value: p.id, textContent: p.name }));
   }
@@ -1011,14 +1345,13 @@ function wireEvents() {
     renderComposer();
   });
   dom.btnResetRun.addEventListener('click', () => {
-    state.runState.clear();
-    renderComposer();
-    void refreshExportTab();
+    loadPipelinePreset(dom.pipelineSelect.value || SAMPLE_PIPELINES[0].id);
   });
 
   for (const site of ECOSYSTEM_DIRECTORY) {
     dom.probeQuickChips.append(
       el('button', {
+        type: 'button',
         className: 'chip',
         textContent: site.brand,
         onClick: () => void runSingleProbe(site.siteBase),
@@ -1042,10 +1375,24 @@ function wireEvents() {
   for (const st of dom.subtabs) {
     st.addEventListener('click', () => {
       state.activeArtifact = st.dataset.artifact;
-      for (const b of dom.subtabs) b.classList.toggle('active', b === st);
+      for (const b of dom.subtabs) {
+        const active = b === st;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-selected', String(active));
+      }
       renderActiveArtifactPreview();
     });
   }
+
+  dom.btnVerifyTrace.addEventListener('click', async () => {
+    if (!state.lastTrace) return;
+    const res = await verifyShareableTrace(state.lastTrace);
+    state.lastTraceVerified = res;
+    dom.compileMessages.textContent = res.valid
+      ? `TRACE VERIFIED: ${res.reason}`
+      : `TRACE INVALID: ${res.reason}`;
+    renderSelfAudit();
+  });
 
   dom.btnCopyArtifact.addEventListener('click', async () => {
     await navigator.clipboard?.writeText(dom.artifactPreview.textContent || '');
@@ -1062,6 +1409,7 @@ function wireEvents() {
       manifest: 'agent-manifest.json',
       links: 'links.json',
       trace: 'meshweave-trace.json',
+      bundle: `${state.lastCompiled.networkName}.bundle.json`,
     };
     const blob = new Blob([dom.artifactPreview.textContent || '{}'], { type: 'application/json' });
     const a = document.createElement('a');
@@ -1070,6 +1418,19 @@ function wireEvents() {
     a.click();
     URL.revokeObjectURL(a.href);
   });
+
+  dom.btnDownloadUnified.addEventListener('click', () => {
+    if (!state.lastUnifiedBundle) return;
+    const blob = new Blob([JSON.stringify(state.lastUnifiedBundle, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${state.lastCompiled?.networkName || 'meshweave'}-unified-bundle.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  dom.btnRunSelfAudit.addEventListener('click', () => void refreshExportTab());
+  dom.btnSimulateRogue.addEventListener('click', () => void runRogueSecurityDrill());
 
   window.addEventListener('resize', () => {
     if (state.activeTab === 'composer') requestAnimationFrame(drawDagEdges);

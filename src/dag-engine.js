@@ -4,6 +4,82 @@
  */
 
 const UNSAFE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const SECRET_KEY_PATTERN = /(api[_-]?key|byok|authorization|bearer|cookie|session[_-]?token|password|secret|private[_-]?key|ssn|passport)/i;
+const SECRET_VALUE_PATTERNS = [
+  /\bsk-[A-Za-z0-9_-]{12,}/,
+  /\bghp_[A-Za-z0-9]{16,}/,
+  /\bBearer\s+[A-Za-z0-9._-]{12,}/i,
+  /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/,
+  /\b\d{3}-\d{2}-\d{4}\b/,
+];
+
+export const DEFAULT_HOP_SLY_CONTEXT = {
+  request_id: 'mesh-req-2026',
+  caller_origin: 'https://cocvn157.github.io',
+  byok_api_key: 'sk-live-CANARY_NEVER_CROSS_ORIGIN',
+  session_cookie: 'sid=mesh-secret-cookie',
+  user_email: 'visitor@example.com',
+};
+
+export function detectSlyCanary(value) {
+  if (typeof value === 'string') {
+    for (const pat of SECRET_VALUE_PATTERNS) {
+      if (pat.test(value)) return `matched ${pat.source}`;
+    }
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const hit = detectSlyCanary(item);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (isPlainObject(value)) {
+    for (const [k, v] of Object.entries(value)) {
+      if (SECRET_KEY_PATTERN.test(k)) return `sensitive key '${k}'`;
+      const hit = detectSlyCanary(v);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+/**
+ * Evaluate destination-scoped sly_data boundary stripping for a cross-origin hop.
+ */
+export function evaluateHopSlyBoundary(proposedSly = {}, allowedKeys = []) {
+  const input = isPlainObject(proposedSly) ? proposedSly : {};
+  const allowSet = new Set(Array.isArray(allowedKeys) ? allowedKeys.map(String) : []);
+  const permitted = {};
+  const strippedKeys = [];
+  const canaryAlerts = [];
+
+  for (const [key, val] of Object.entries(input)) {
+    const keySecret = SECRET_KEY_PATTERN.test(key);
+    const valCanary = detectSlyCanary(val);
+    if (keySecret || valCanary) {
+      strippedKeys.push(key);
+      canaryAlerts.push(
+        `Stripped sly_data.${key} (${keySecret ? 'credential/PII key' : valCanary})`,
+      );
+      continue;
+    }
+    if (allowSet.has('*') || allowSet.has(key)) {
+      permitted[key] = safeClone(val);
+    } else {
+      strippedKeys.push(key);
+    }
+  }
+
+  return {
+    proposedKeys: Object.keys(input),
+    permittedKeys: Object.keys(permitted),
+    strippedKeys,
+    canaryAlerts,
+    permitted,
+  };
+}
 
 export function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -386,4 +462,74 @@ export function resolveNodeArguments(node, incomingEdges = [], outputsByNodeId =
     }
   }
   return { args, appliedBindings };
+}
+
+/**
+ * Toggle a hop's enabled state cleanly without mutating the source DAG.
+ */
+export function toggleDagNode(dag, nodeId) {
+  const next = safeClone(dag);
+  const target = (next.nodes || []).find((n) => n.id === nodeId);
+  if (target) {
+    target.enabled = target.enabled === false ? true : false;
+  }
+  return next;
+}
+
+/**
+ * Reorder a hop earlier (-1) or later (+1) in the pipeline and rewire chain edges safely.
+ */
+export function reorderDagNodes(dag, nodeId, direction = 'earlier') {
+  const next = safeClone(dag);
+  const nodes = Array.isArray(next.nodes) ? next.nodes : [];
+  const idx = nodes.findIndex((n) => n.id === nodeId);
+  if (idx < 0) return next;
+
+  const swapIdx = direction === 'later' ? idx + 1 : idx - 1;
+  if (swapIdx < 0 || swapIdx >= nodes.length) return next;
+
+  const oldIds = nodes.map((n) => n.id);
+  const [moved] = nodes.splice(idx, 1);
+  nodes.splice(swapIdx, 0, moved);
+
+  // Preserve sequential chain topology if existing edges followed a linear chain
+  const isLinearChain =
+    Array.isArray(next.edges) &&
+    next.edges.length === Math.max(0, oldIds.length - 1) &&
+    next.edges.every((e, i) => e.from === oldIds[i] && e.to === oldIds[i + 1]);
+
+  if (isLinearChain) {
+    const newEdges = [];
+    for (let i = 0; i < nodes.length - 1; i += 1) {
+      const fromNode = nodes[i];
+      const toNode = nodes[i + 1];
+      const existing = next.edges.find((e) => e.from === fromNode.id && e.to === toNode.id);
+      const candidateMappings = existing ? existing.mappings || [] : [];
+      const check = evaluateEdgeContract(fromNode, toNode, candidateMappings);
+      newEdges.push({
+        id: `edge_${i + 1}_${i + 2}`,
+        from: fromNode.id,
+        to: toNode.id,
+        mappings: check.compatible ? candidateMappings : [],
+      });
+    }
+    next.edges = newEdges;
+  } else {
+    // Reverse any direct edge between the two swapped nodes so topological order matches
+    const aId = oldIds[idx];
+    const bId = oldIds[swapIdx];
+    for (const edge of next.edges || []) {
+      if ((edge.from === aId && edge.to === bId) || (edge.from === bId && edge.to === aId)) {
+        const tmp = edge.from;
+        edge.from = edge.to;
+        edge.to = tmp;
+        const fromNode = nodes.find((n) => n.id === edge.from);
+        const toNode = nodes.find((n) => n.id === edge.to);
+        const check = evaluateEdgeContract(fromNode, toNode, edge.mappings || []);
+        if (!check.compatible) edge.mappings = [];
+      }
+    }
+  }
+
+  return next;
 }

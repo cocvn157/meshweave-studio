@@ -16,15 +16,16 @@
 As more Open Agentic Websites go live under MVP Profile 0.3 (`Shutdown Clerk`, `Plainly`, `Agent Customs`, `Agent Atlas`, `Three Numbers`, `NandaSeal`, `ScopeGate Studio`), composing *multi-hop workflows across independent origins* exposes real friction: do partner bridges actually load in hidden iframes without `X-Frame-Options` blocks, do they speak Cognizant's `nsdeploy-actions-v1` `MessageChannel` protocol, do their `actions.module` catalogs expose cross-site reads, and do upstream outputs match downstream `inputSchema` contracts? **MeshWeave Studio** turns multi-site composition, live bridge contract probing, and `.network.json` compilation into a visual, `$0`-API-key browser workbench.
 
 ### What it does
-1. **Visual Multi-Hop Workflow DAG Composer & Live `ActionBridgeClient` Runner:**
-   - Visually wire acyclic multi-hop workflows across multiple Open Agentic Websites (`ScopeGate Studio`, `NandaSeal Trust Studio`, `MeshWeave Studio`, or any custom `https://...` partner URL) with JSON-path edge bindings (`$.origin -> siteUrl`, `$.siteUrl -> hops[1].partnerUrl`).
-   - Executes real cross-origin hidden-iframe `ActionBridgeClient` / `MessageChannel` RPCs directly in the browser with `$0` API keys across 3 instant sample pipelines, plus live custom partner discovery.
-   - Includes a **Strict `MessageChannel` Only** toggle vs **Interop Adapter** mode that surfaces wire-protocol divergences (`nsdeploy-actions-v1` vs `nsdeploy-action-bridge/v1`) rather than hiding them.
+1. **Visual Multi-Hop Workflow DAG Composer, Reorder/Toggle Builder & Live `MessageChannel` Waterfall Tracer:**
+   - Visually wire, reorder (`← Earlier` / `Later →`), and toggle (`ON`/`OFF`) acyclic multi-hop workflows across multiple Open Agentic Websites (`ScopeGate Studio` ↔ `NandaSeal Trust Studio` ↔ `MeshWeave Studio`, or any custom `https://...` partner URL) with JSON-path edge bindings (`$.origin -> siteUrl`, `$.siteUrl -> hops[1].partnerUrl`).
+   - Executes real cross-origin hidden-iframe `ActionBridgeClient` / `MessageChannel` RPCs directly in the browser with `$0` API keys across 3 instant sample pipelines, displaying a **Live MessageChannel Waterfall Tracer** with per-hop handshake + execution latency bars (ms), wire schema validation, and `sly_data` boundary secret stripping per hop.
+   - Includes a **Strict `MessageChannel` Only** toggle vs **Interop Adapter** mode that validates `nsdeploy-actions-v1` fail-closed.
 2. **Live Bridge Contract & Ecosystem Interop Matrix Prober:**
    - Audits any site's `agent-manifest.json` (`Access-Control-Allow-Origin`), `.network.json` graph & `sly_data` boundaries, `links.json`, `agent-mcp.json`, and `bridge/action-bridge.html` framing/module contracts.
    - Benchmarks all 9 live Open Agentic Web ecosystem sites side-by-side over real hidden iframes, reporting exact round-trip latency (ms), exposed catalog action counts, hosted MCP tools, and clear non-blocking diagnostics.
-3. **Composable `.network.json`, Manifest & Shareable Trace Generator:**
-   - Compiles the visual DAG into valid MVP Profile 0.3 `<network>.network.json` (both direct peer URLs and symbolic `link_slots` + `links.json`), `agent-manifest.json` (with deduplicated `allowed_peers` and deny-by-default `sly_data` policy), and a canonical SHA-256 execution trace JSON.
+3. **1-Click Composable Unified Bundle, ECDSA P-256 Signed Trace, Self-Audit & Rogue-Frame Security Drill:**
+   - Compiles the visual DAG into valid MVP Profile 0.3 `<network>.network.json` (both direct peer URLs and symbolic `link_slots` + `links.json`), `agent-manifest.json`, an **ECDSA P-256 + SHA-256 signed `meshweave-trace.json`**, and a **1-click Unified Bundle (`.json`)**.
+   - Includes a live **Protocol Self-Audit** and interactive **"Simulate Rogue Frame / Untrusted Origin"** security drill proving fail-closed `ActionBridge` rejection against spoofed origins, `"null"`-origin sandbox iframes, iframe write escalations, and replay `requestId` attacks.
 
 ### How we built it
 Built with zero runtime or build dependencies in pure modular ES JavaScript, HTML5/CSS3, SVG edge layout, browser `MessageChannel` + Cognizant's unmodified Apache-2.0 `runtime/` (`ActionBridgeClient`, `ActionRegistry`, `web-crypto`), and Node's built-in `node --test` runner. Verified with automated unit/contract tests, headless Edge `1280×720` E2E live multi-origin execution, and Cognizant's `check_partner.mjs` (`0` errors, `0` warnings).

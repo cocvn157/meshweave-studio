@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MeshWeave Studio — Cross-Site Open Agentic Web DAG Composer & Bridge Prober</title>
+  <title>MeshWeave Studio — Cross-Site Open Agentic Web DAG Composer &amp; Bridge Prober</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23080c14'/%3E%3Ccircle cx='8' cy='16' r='3.2' fill='%2338bdf8'/%3E%3Ccircle cx='24' cy='9' r='3.2' fill='%2310b981'/%3E%3Ccircle cx='24' cy='23' r='3.2' fill='%23818cf8'/%3E%3Cpath d='M11 15L21 9.8M11 17L21 22.2' stroke='%2338bdf8' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -13,11 +14,11 @@
         <div class="eyebrow">OPEN AGENTIC WEB · MVP PROFILE 0.3 · MULTI-HOP BRIDGE ORCHESTRATOR</div>
         <div class="title-row">
           <h1>MeshWeave Studio</h1>
-          <span id="self-bridge-pill" class="pill neutral">Checking Self-Bridge…</span>
+          <span id="self-bridge-pill" class="pill neutral" aria-live="polite">Checking Self-Bridge…</span>
         </div>
         <p class="subtitle">
           Visually compose cross-site workflows over live <code>ActionBridgeClient</code> / <code>MessageChannel</code> bridges,
-          probe partner contracts &amp; schemas, and compile portable <code>.network.json</code> topologies.
+          inspect per-hop <code>sly_data</code> boundary stripping &amp; waterfall latencies, and compile signed MVP 0.3 bundles.
         </p>
       </div>
       <div class="artifact-box">
@@ -35,19 +36,19 @@
 
   <main class="container main-shell">
     <nav class="tabs" role="tablist" aria-label="MeshWeave Studio Views">
-      <button class="tab active" data-tab="composer" role="tab" aria-selected="true">
+      <button id="tab-btn-composer" class="tab active" data-tab="composer" role="tab" aria-selected="true" aria-controls="tab-composer" tabindex="0">
         1. Workflow DAG Composer
       </button>
-      <button class="tab" data-tab="prober" role="tab" aria-selected="false">
+      <button id="tab-btn-prober" class="tab" data-tab="prober" role="tab" aria-selected="false" aria-controls="tab-prober" tabindex="-1">
         2. Bridge Contract &amp; Interop Matrix
       </button>
-      <button class="tab" data-tab="export" role="tab" aria-selected="false">
-        3. Composable Manifest &amp; Trace Export
+      <button id="tab-btn-export" class="tab" data-tab="export" role="tab" aria-selected="false" aria-controls="tab-export" tabindex="-1">
+        3. Composable Export, Self-Audit &amp; Security
       </button>
     </nav>
 
     <!-- TAB 1: WORKFLOW DAG COMPOSER -->
-    <section id="tab-composer" class="panel active" role="tabpanel">
+    <section id="tab-composer" class="panel active" role="tabpanel" aria-labelledby="tab-btn-composer">
       <div class="toolbar card">
         <div class="toolbar-row">
           <div class="preset-group">
@@ -59,44 +60,57 @@
             <span>Strict MessageChannel Only</span>
           </label>
           <div class="toolbar-actions">
-            <button id="btn-run-dag" class="btn primary">&#9654; Run Live DAG</button>
-            <button id="btn-open-add-hop" class="btn secondary">+ Add Partner Hop</button>
-            <button id="btn-open-add-edge" class="btn secondary">+ Wire Edge</button>
-            <button id="btn-reset-run" class="btn ghost">Reset Run</button>
+            <button id="btn-run-dag" type="button" class="btn primary">&#9654; Run Live DAG</button>
+            <button id="btn-open-add-hop" type="button" class="btn secondary">+ Add Partner Hop</button>
+            <button id="btn-open-add-edge" type="button" class="btn secondary">+ Wire Edge</button>
+            <button id="btn-reset-run" type="button" class="btn ghost">Reset Run</button>
           </div>
         </div>
         <div id="pipeline-description" class="pipeline-desc"></div>
       </div>
 
       <div class="composer-grid">
-        <!-- Left: Visual DAG Graph -->
-        <div class="card dag-stage">
-          <div class="stage-header">
-            <div id="dag-status-banner" class="status-pill neutral">Validating DAG…</div>
-            <div class="stage-legend">
-              <span class="legend-item"><i class="dot match"></i> Schema Match</span>
-              <span class="legend-item"><i class="dot mismatch"></i> Schema Mismatch</span>
-              <span class="legend-item"><i class="dot live"></i> Live Executed</span>
+        <!-- Left: Visual DAG Graph + Waterfall Tracer -->
+        <div class="dag-column-stack">
+          <div class="card dag-stage">
+            <div class="stage-header">
+              <div id="dag-status-banner" class="status-pill neutral" aria-live="polite">Validating DAG…</div>
+              <div class="stage-legend">
+                <span class="legend-item"><i class="dot match"></i> Schema Match</span>
+                <span class="legend-item"><i class="dot mismatch"></i> Schema Mismatch</span>
+                <span class="legend-item"><i class="dot live"></i> Live Executed</span>
+              </div>
+            </div>
+            <div id="dag-canvas-scroll" class="dag-canvas-scroll">
+              <div id="dag-canvas" class="dag-canvas">
+                <svg id="dag-edges-svg" class="dag-edges-svg" aria-hidden="true"></svg>
+                <div id="dag-columns" class="dag-columns"></div>
+                <div id="edge-badges-layer" class="edge-badges-layer"></div>
+              </div>
             </div>
           </div>
-          <div id="dag-canvas-scroll" class="dag-canvas-scroll">
-            <div id="dag-canvas" class="dag-canvas">
-              <svg id="dag-edges-svg" class="dag-edges-svg" aria-hidden="true"></svg>
-              <div id="dag-columns" class="dag-columns"></div>
-              <div id="edge-badges-layer" class="edge-badges-layer"></div>
+
+          <div class="card waterfall-card" aria-label="Live MessageChannel Waterfall Tracer">
+            <div class="stage-header">
+              <div>
+                <h3>Live MessageChannel Waterfall &amp; sly_data Boundary Tracer</h3>
+                <div class="muted small-note">Per-hop handshake + execution latency bars, wire schema validation, and cross-origin secret stripping</div>
+              </div>
+              <span id="waterfall-summary-pill" class="pill neutral">Awaiting live run</span>
             </div>
+            <div id="waterfall-list" class="waterfall-list"></div>
           </div>
         </div>
 
         <!-- Right: Contextual Inspector / Add Hop / Wire Edge -->
-        <aside class="card inspector-panel" id="inspector-panel">
+        <aside class="card inspector-panel" id="inspector-panel" aria-label="Hop and Edge Inspector">
           <div id="inspector-content"></div>
         </aside>
       </div>
     </section>
 
     <!-- TAB 2: BRIDGE CONTRACT & INTEROP MATRIX PROBER -->
-    <section id="tab-prober" class="panel" role="tabpanel">
+    <section id="tab-prober" class="panel" role="tabpanel" aria-labelledby="tab-btn-prober">
       <div class="card">
         <div class="prober-header">
           <div>
@@ -106,12 +120,12 @@
               <code>agent-mcp.json</code>, and connects via hidden iframe to test <code>bridge/action-bridge.html</code> catalogs &amp; schemas.
             </p>
           </div>
-          <button id="btn-probe-matrix" class="btn primary">Probe Full Ecosystem Matrix (9 Sites)</button>
+          <button id="btn-probe-matrix" type="button" class="btn primary">Probe Full Ecosystem Matrix (9 Sites)</button>
         </div>
 
         <div class="probe-input-row">
-          <input id="probe-url-input" class="input" type="url" value="." placeholder="https://partner.example or https://partner.example/network_name" />
-          <button id="btn-probe-single" class="btn secondary">Probe Single Partner</button>
+          <input id="probe-url-input" class="input" type="url" value="." placeholder="https://partner.example or https://partner.example/network_name" aria-label="Partner site URL to probe" />
+          <button id="btn-probe-single" type="button" class="btn secondary">Probe Single Partner</button>
         </div>
         <div id="probe-quick-chips" class="chip-row"></div>
       </div>
@@ -123,7 +137,7 @@
       <div class="card mt-16">
         <div class="matrix-header">
           <h3>Open Agentic Web Ecosystem Interop Matrix</h3>
-          <span id="matrix-summary-badge" class="pill neutral">Not probed yet</span>
+          <span id="matrix-summary-badge" class="pill neutral" aria-live="polite">Not probed yet</span>
         </div>
         <div class="table-wrap">
           <table class="matrix-table" id="matrix-table">
@@ -148,15 +162,15 @@
       </div>
     </section>
 
-    <!-- TAB 3: COMPOSABLE MANIFEST & TRACE EXPORT -->
-    <section id="tab-export" class="panel" role="tabpanel">
+    <!-- TAB 3: COMPOSABLE MANIFEST, SELF-AUDIT & BRIDGE SECURITY DRILL -->
+    <section id="tab-export" class="panel" role="tabpanel" aria-labelledby="tab-btn-export">
       <div class="card">
         <div class="export-header">
           <div>
-            <h2>Composable <code>.network.json</code>, Manifest &amp; Shareable Trace Compiler</h2>
-            <p class="muted">Compiles your live visual DAG into portable Open Agentic Web MVP Profile 0.3 files and a SHA-256 execution trace.</p>
+            <h2>Composable <code>.network.json</code>, Manifest &amp; Signed Trace Compiler</h2>
+            <p class="muted">Compiles your live visual DAG into portable Open Agentic Web MVP Profile 0.3 files and an ECDSA P-256 signed trace bundle.</p>
           </div>
-          <div id="compile-validation-badge" class="pill pass">Valid Bundle (0 errors)</div>
+          <div id="compile-validation-badge" class="pill pass" aria-live="polite">Valid Bundle (0 errors)</div>
         </div>
 
         <div class="compile-form">
@@ -189,20 +203,55 @@
         </div>
 
         <div class="subtabs-row">
-          <div class="subtabs" role="tablist">
-            <button class="subtab active" data-artifact="network">.network.json</button>
-            <button class="subtab" data-artifact="manifest">agent-manifest.json</button>
-            <button class="subtab" data-artifact="links">links.json</button>
-            <button class="subtab" data-artifact="trace">meshweave-trace.json</button>
+          <div class="subtabs" role="tablist" aria-label="Compiled Bundle Artifacts">
+            <button type="button" class="subtab active" data-artifact="network" role="tab" aria-selected="true">.network.json</button>
+            <button type="button" class="subtab" data-artifact="manifest" role="tab" aria-selected="false">agent-manifest.json</button>
+            <button type="button" class="subtab" data-artifact="links" role="tab" aria-selected="false">links.json</button>
+            <button type="button" class="subtab" data-artifact="trace" role="tab" aria-selected="false">meshweave-trace.json</button>
+            <button type="button" class="subtab" data-artifact="bundle" role="tab" aria-selected="false">Unified Bundle (.json)</button>
           </div>
           <div class="artifact-actions">
-            <button id="btn-copy-artifact" class="btn secondary">Copy JSON</button>
-            <button id="btn-download-artifact" class="btn primary">Download File</button>
+            <button id="btn-verify-trace" type="button" class="btn secondary">Verify Signed Trace</button>
+            <button id="btn-copy-artifact" type="button" class="btn secondary">Copy JSON</button>
+            <button id="btn-download-artifact" type="button" class="btn ghost">Download Active</button>
+            <button id="btn-download-unified" type="button" class="btn primary">1-Click Export Unified Bundle</button>
           </div>
         </div>
 
-        <div id="compile-messages" class="compile-messages"></div>
+        <div id="compile-messages" class="compile-messages" aria-live="polite"></div>
         <pre id="artifact-preview" class="code-viewer"></pre>
+      </div>
+
+      <div class="security-grid mt-16">
+        <div class="card">
+          <div class="export-header">
+            <div>
+              <h3>MVP Profile 0.3 Protocol Self-Audit</h3>
+              <div class="muted small-note">Verifies acyclic DAG, HTTPS peers, edge contracts, sly_data boundary &amp; ECDSA P-256 signature</div>
+            </div>
+            <div class="artifact-actions">
+              <span id="self-audit-pill" class="pill neutral" aria-live="polite">Ready</span>
+              <button id="btn-run-self-audit" type="button" class="btn secondary sm">Re-Run Self-Audit</button>
+            </div>
+          </div>
+          <div id="self-audit-list" class="checks-grid"></div>
+        </div>
+
+        <div class="card">
+          <div class="export-header">
+            <div>
+              <h3>ActionBridge Fail-Closed Security Drill</h3>
+              <div class="muted small-note">Proves rogue frames, opaque "null" sandbox iframes, write escalations &amp; replay IDs fail closed</div>
+            </div>
+            <div class="artifact-actions">
+              <span id="rogue-drill-pill" class="pill neutral" aria-live="polite">Not simulated</span>
+              <button id="btn-simulate-rogue" type="button" class="btn danger sm">Simulate Rogue Frame / Untrusted Origin</button>
+            </div>
+          </div>
+          <div id="rogue-drill-results" class="form-stack">
+            <div class="muted">Click <strong>Simulate Rogue Frame / Untrusted Origin</strong> to test live fail-closed rejection against <code>./bridge/action-bridge.html</code>.</div>
+          </div>
+        </div>
       </div>
     </section>
   </main>

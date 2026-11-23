@@ -4,3 +4,5 @@ node_modules/
 _site/
 *.log
 .DS_Store
+demo/*.mp4
+demo/*.png
